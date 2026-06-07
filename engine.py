@@ -182,6 +182,10 @@ class Game:
         
         # Character menu button rects
         self.char_menu_stat_buttons = {}
+        
+        # Interactable detection
+        self.focused_item_tile = None
+        self.interaction_pulse_time = 0
 
     def get_initial_map_data(self):
         """Load map from JSON or create default bordered map"""
@@ -437,6 +441,36 @@ class Game:
         
         self.screen.blit(self.raycasting_surface, (0, 0))
 
+    def detect_focused_item(self):
+        """Detect if player is looking at an interactable item"""
+        # Check the tile directly in front of the player
+        look_distance = 5  # How far ahead to look
+        look_x = self.player_x + math.cos(self.player_angle) * look_distance
+        look_y = self.player_y + math.sin(self.player_angle) * look_distance
+        
+        col = int(look_x / TILE_SIZE)
+        row = int(look_y / TILE_SIZE)
+        
+        if 0 <= col < MAP_SIZE and 0 <= row < MAP_SIZE:
+            tile = self.map[row][col]
+            
+            # Interactable tiles
+            interactable_tiles = [
+                TileType.ITEM_DAGGER.value, TileType.ITEM_KEY.value, TileType.ITEM_KEY_SILVER.value,
+                TileType.ITEM_KEY_GOLD.value, TileType.ITEM_KEY_DUNGEON.value, TileType.ITEM_KEY_RUSTY_2.value,
+                TileType.ITEM_HEALTH_POTION.value, TileType.ITEM_FOOD.value, TileType.ITEM_ARTIFACT.value,
+                TileType.ITEM_UNLIT_TORCH.value, TileType.ITEM_STAFF.value, TileType.ITEM_STAMINA_POTION.value,
+                TileType.DOOR.value, TileType.DOOR_SILVER.value, TileType.DOOR_GOLD.value,
+                TileType.STAIRS.value, TileType.FORCE_FIELD.value
+            ]
+            
+            if tile in interactable_tiles:
+                self.focused_item_tile = (col, row)
+                return True
+        
+        self.focused_item_tile = None
+        return False
+
     def render_weather(self):
         """Render weather particles"""
         if self.weather_type == 'none':
@@ -684,8 +718,28 @@ class Game:
         mouse_pos = pygame.mouse.get_pos()
         self.inventory.draw(self.screen, mouse_pos, self.font)
 
+    def render_focused_item_box(self):
+        """Render white box around focused item in center of screen"""
+        if self.focused_item_tile is None:
+            return
+        
+        # Draw a pulsing white box in the center of screen
+        center_x = WIDTH // 2
+        center_y = HEIGHT // 2
+        box_size = 80
+        
+        # Pulsing effect
+        pulse = math.sin(pygame.time.get_ticks() / 300) * 0.5 + 0.5
+        alpha_value = int(100 + (pulse * 155))
+        
+        # Create semi-transparent white box
+        box_surface = pygame.Surface((box_size, box_size), pygame.SRCALPHA)
+        pygame.draw.rect(box_surface, (255, 255, 255, alpha_value), (0, 0, box_size, box_size), 3)
+        
+        self.screen.blit(box_surface, (center_x - box_size // 2, center_y - box_size // 2))
+
     def render_system_shock_cursor(self):
-        """Render System Shock 2 style cursor"""
+        """Render System Shock 2 style cursor - always on top"""
         mouse_pos = pygame.mouse.get_pos()
         cursor_size = 15
         cursor_color = (150, 200, 255)
@@ -864,6 +918,7 @@ class Game:
             keys = pygame.key.get_pressed()
             self.handle_player_movement(keys)
             self.check_item_pickup()
+            self.detect_focused_item()
             
             # Update sun position
             self.update_sun_position()
@@ -875,7 +930,8 @@ class Game:
             self.render_3d_view()
             self.render_weather()
             self.render_ui()
-            self.render_system_shock_cursor()
+            self.render_focused_item_box()  # Render before cursor so cursor is on top
+            self.render_system_shock_cursor()  # Always render cursor last so it's on top
             
             # Natural health/mana/stamina decay
             if self.stamina > 0:
