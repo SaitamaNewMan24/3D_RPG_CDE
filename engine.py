@@ -85,7 +85,7 @@ def get_tile_color(tile_type):
 class Game:
     def __init__(self):
         pygame.init()
-        pygame.mouse.set_visible(False) 
+        pygame.mouse.set_visible(True)  # Make mouse cursor always visible
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("RPGW3D Engine")
         self.clock = pygame.time.Clock()
@@ -113,6 +113,10 @@ class Game:
         self.intelligence = 10
         self.endurance = 10
         self.show_stat_screen = False
+        self.show_character_menu = False
+        self.experience = 0
+        self.level = 1
+        self.experience_to_next_level = 100
         
         # Initialize stats
         self.recalculate_max_stats()
@@ -175,6 +179,9 @@ class Game:
         self.weather_particles = []
         self.weather_duration = 0
         self.next_weather_time = random.randint(2000, 4000)
+        
+        # Character menu button rects
+        self.char_menu_stat_buttons = {}
 
     def get_initial_map_data(self):
         """Load map from JSON or create default bordered map"""
@@ -485,17 +492,17 @@ class Game:
         pygame.draw.circle(self.screen, (255, 255, 0), (sun_x, sun_y), 4)
 
     def render_hud(self):
-        """Render HUD with styled bars and stats"""
+        """Render HUD with styled bars and stats - black background with golden border"""
         hud_x = 10
         hud_y = 10
-        bar_width = 330
-        bar_height = 60
+        bar_width = 280
+        bar_height = 50
         spacing = 5
+        box_padding = 10
         
-        # HUD Background panel
-        hud_panel = pygame.Rect(hud_x - 5, hud_y - 5, bar_width + 10, (bar_height + spacing) * 5)
-
-        pygame.draw.rect(self.screen, (30, 30, 35), hud_panel)
+        # HUD Background panel - Black with gold border
+        hud_panel = pygame.Rect(hud_x - box_padding, hud_y - box_padding, bar_width + (box_padding * 2), (bar_height + spacing) * 5 + box_padding)
+        pygame.draw.rect(self.screen, (0, 0, 0), hud_panel)  # Black background
         pygame.draw.rect(self.screen, (200, 180, 100), hud_panel, 3)  # Gold border
         
         # Health Bar
@@ -530,19 +537,137 @@ class Game:
         pygame.draw.rect(self.screen, (100, 255, 100), (hud_x, stamina_y + 20, stamina_fill, bar_height))
         pygame.draw.rect(self.screen, (200, 180, 100), stamina_bar_rect, 2)  # Gold border
         
-        # Level info
+        # Level and Experience info
         level_y = stamina_y + 45
-        level_text = self.font_small_bold.render(f"LVL: {self.current_level}", True, (255, 255, 100))
+        level_text = self.font_small_bold.render(f"LVL: {self.level}", True, (255, 255, 100))
         self.screen.blit(level_text, (hud_x + 5, level_y))
+        
+        # Experience bar
+        exp_bar_rect = pygame.Rect(hud_x, level_y + 25, bar_width, 20)
+        pygame.draw.rect(self.screen, (30, 30, 30), exp_bar_rect)
+        exp_fill = bar_width * (self.experience / max(1, self.experience_to_next_level))
+        pygame.draw.rect(self.screen, (150, 100, 50), (hud_x, level_y + 25, exp_fill, 20))
+        pygame.draw.rect(self.screen, (200, 180, 100), exp_bar_rect, 2)  # Gold border
+        
+        exp_text = self.font.render(f"EXP: {self.experience}/{self.experience_to_next_level}", True, (200, 200, 200))
+        self.screen.blit(exp_text, (hud_x + 5, level_y + 50))
         
         # Time of day display
         hour = int(self.time_of_day * 24)
         time_text = self.font.render(f"Time: {hour:02d}:00", True, (200, 200, 200))
-        self.screen.blit(time_text, (hud_x + 5, level_y + 25))
+        self.screen.blit(time_text, (hud_x + 5, level_y + 75))
         
         # Weather indicator
         weather_text = self.font.render(f"Weather: {self.weather_type.upper()}", True, (150, 200, 255))
-        self.screen.blit(weather_text, (hud_x + 5, level_y + 50))
+        self.screen.blit(weather_text, (hud_x + 5, level_y + 100))
+
+    def render_character_menu(self, mouse_pos):
+        """Render character menu with skill point allocation"""
+        panel_width = 500
+        panel_height = 600
+        panel_x = (WIDTH - panel_width) // 2
+        panel_y = (HEIGHT - panel_height) // 2
+        
+        # Background
+        pygame.draw.rect(self.screen, (20, 20, 25), (panel_x, panel_y, panel_width, panel_height))
+        pygame.draw.rect(self.screen, (200, 180, 100), (panel_x, panel_y, panel_width, panel_height), 3)
+        
+        # Title
+        title = self.font_massive.render("CHARACTER", True, (255, 215, 0))
+        self.screen.blit(title, (panel_x + panel_width // 2 - title.get_width() // 2, panel_y + 20))
+        
+        # Available points
+        points_y = panel_y + 80
+        points_text = self.font_msg.render(f"Points Available: {self.stat_points}", True, (0, 255, 100))
+        self.screen.blit(points_text, (panel_x + 20, points_y))
+        
+        # Stats section
+        stats_y = points_y + 60
+        stats = [
+            ("Strength", self.strength, "STR"),
+            ("Intelligence", self.intelligence, "INT"),
+            ("Endurance", self.endurance, "END"),
+        ]
+        
+        self.char_menu_stat_buttons = {}
+        
+        for idx, (stat_name, stat_val, stat_abbr) in enumerate(stats):
+            y_pos = stats_y + (idx * 100)
+            
+            # Stat label and value
+            stat_text = self.font_msg.render(f"{stat_name}: {stat_val}", True, (100, 200, 255))
+            self.screen.blit(stat_text, (panel_x + 20, y_pos))
+            
+            # Plus button
+            plus_btn = pygame.Rect(panel_x + 300, y_pos + 5, 40, 40)
+            pygame.draw.rect(self.screen, (50, 100, 50) if plus_btn.collidepoint(mouse_pos) else (30, 60, 30), plus_btn)
+            pygame.draw.rect(self.screen, (100, 200, 100), plus_btn, 2)
+            plus_text = self.font_msg.render("+", True, (255, 255, 255))
+            self.screen.blit(plus_text, (plus_btn.x + 10, plus_btn.y + 3))
+            
+            self.char_menu_stat_buttons[stat_abbr + "_plus"] = plus_btn
+            
+            # Minus button
+            minus_btn = pygame.Rect(panel_x + 350, y_pos + 5, 40, 40)
+            pygame.draw.rect(self.screen, (100, 50, 50) if minus_btn.collidepoint(mouse_pos) else (60, 30, 30), minus_btn)
+            pygame.draw.rect(self.screen, (200, 100, 100), minus_btn, 2)
+            minus_text = self.font_msg.render("-", True, (255, 255, 255))
+            self.screen.blit(minus_text, (minus_btn.x + 13, minus_btn.y + 3))
+            
+            self.char_menu_stat_buttons[stat_abbr + "_minus"] = minus_btn
+            
+            # Derived stats
+            derived_y = y_pos + 50
+            if stat_abbr == "STR":
+                derived = f"Melee DMG: {self.melee_dmg}"
+            elif stat_abbr == "INT":
+                derived = f"Magic DMG: {self.magic_dmg}"
+            else:
+                derived = f"Max Health: {self.max_health}"
+            
+            derived_text = self.font.render(derived, True, (200, 150, 100))
+            self.screen.blit(derived_text, (panel_x + 20, derived_y))
+        
+        # Close button
+        close_btn = pygame.Rect(panel_x + panel_width - 100, panel_y + panel_height - 50, 80, 40)
+        pygame.draw.rect(self.screen, (100, 50, 50) if close_btn.collidepoint(mouse_pos) else (60, 30, 30), close_btn)
+        pygame.draw.rect(self.screen, (200, 100, 100), close_btn, 2)
+        close_text = self.font_msg.render("Close", True, (255, 255, 255))
+        self.screen.blit(close_text, (close_btn.x + 8, close_btn.y + 5))
+        
+        self.char_menu_stat_buttons["close"] = close_btn
+
+    def handle_character_menu_click(self, mouse_pos):
+        """Handle character menu button clicks"""
+        for button_name, button_rect in self.char_menu_stat_buttons.items():
+            if button_rect.collidepoint(mouse_pos):
+                if button_name == "close":
+                    self.show_character_menu = False
+                elif button_name == "STR_plus" and self.stat_points > 0:
+                    self.strength += 1
+                    self.stat_points -= 1
+                    self.recalculate_max_stats()
+                elif button_name == "STR_minus" and self.strength > 1:
+                    self.strength -= 1
+                    self.stat_points += 1
+                    self.recalculate_max_stats()
+                elif button_name == "INT_plus" and self.stat_points > 0:
+                    self.intelligence += 1
+                    self.stat_points -= 1
+                    self.recalculate_max_stats()
+                elif button_name == "INT_minus" and self.intelligence > 1:
+                    self.intelligence -= 1
+                    self.stat_points += 1
+                    self.recalculate_max_stats()
+                elif button_name == "END_plus" and self.stat_points > 0:
+                    self.endurance += 1
+                    self.stat_points -= 1
+                    self.recalculate_max_stats()
+                    self.max_health = min(self.health + (5), self.max_health)
+                elif button_name == "END_minus" and self.endurance > 1:
+                    self.endurance -= 1
+                    self.stat_points += 1
+                    self.recalculate_max_stats()
 
     def render_ui(self):
         """Render UI elements"""
@@ -558,6 +683,17 @@ class Game:
         # Inventory
         mouse_pos = pygame.mouse.get_pos()
         self.inventory.draw(self.screen, mouse_pos, self.font)
+
+    def render_system_shock_cursor(self):
+        """Render System Shock 2 style cursor"""
+        mouse_pos = pygame.mouse.get_pos()
+        cursor_size = 15
+        cursor_color = (150, 200, 255)
+        
+        # Draw crosshair-like cursor
+        pygame.draw.line(self.screen, cursor_color, (mouse_pos[0] - cursor_size, mouse_pos[1]), (mouse_pos[0] + cursor_size, mouse_pos[1]), 2)
+        pygame.draw.line(self.screen, cursor_color, (mouse_pos[0], mouse_pos[1] - cursor_size), (mouse_pos[0], mouse_pos[1] + cursor_size), 2)
+        pygame.draw.circle(self.screen, cursor_color, mouse_pos, cursor_size // 2, 1)
 
     def render_stat_screen(self):
         """Render the stat allocation screen"""
@@ -601,7 +737,7 @@ class Game:
         self.screen.blit(points_text, (WIDTH // 2 - points_text.get_width() // 2, HEIGHT - 100))
         
         # Instructions
-        instr = self.font.render("Press I for Inventory | Press C to close | Press ESC to quit", True, (150, 150, 150))
+        instr = self.font.render("Press K for Character Menu | Press I for Inventory | Press C to close | Press ESC to quit", True, (150, 150, 150))
         self.screen.blit(instr, (WIDTH // 2 - instr.get_width() // 2, HEIGHT - 40))
 
     def check_item_pickup(self):
@@ -645,6 +781,8 @@ class Game:
         
         running = True
         while running:
+            mouse_pos = pygame.mouse.get_pos()
+            
             # Event handling
             for e in pygame.event.get():
                 if e.type == pygame.QUIT or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE):
@@ -654,10 +792,25 @@ class Game:
                         self.show_stat_screen = not self.show_stat_screen
                     elif e.key == pygame.K_i:  # INVENTORY HOTKEY
                         self.inventory.toggle()
+                    elif e.key == pygame.K_k:  # CHARACTER MENU HOTKEY
+                        self.show_character_menu = not self.show_character_menu
+                elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                    if self.show_character_menu:
+                        self.handle_character_menu_click(mouse_pos)
             
             # Stat screen
             if self.show_stat_screen:
                 self.render_stat_screen()
+                self.render_system_shock_cursor()
+                pygame.display.flip()
+                self.clock.tick(FPS)
+                continue
+            
+            # Character menu
+            if self.show_character_menu:
+                self.screen.fill((0, 0, 0))
+                self.render_character_menu(mouse_pos)
+                self.render_system_shock_cursor()
                 pygame.display.flip()
                 self.clock.tick(FPS)
                 continue
@@ -669,6 +822,7 @@ class Game:
                 self.screen.blit(game_over_text, (WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2 - 50))
                 restart_text = self.font.render("Press R to restart or ESC to quit", True, (200, 200, 200))
                 self.screen.blit(restart_text, (WIDTH // 2 - restart_text.get_width() // 2, HEIGHT // 2 + 50))
+                self.render_system_shock_cursor()
                 pygame.display.flip()
                 
                 for e in pygame.event.get():
@@ -691,6 +845,7 @@ class Game:
                 self.screen.blit(complete_text, (WIDTH // 2 - complete_text.get_width() // 2, HEIGHT // 2 - 50))
                 next_text = self.font.render("Press SPACE to continue or ESC to quit", True, (200, 200, 200))
                 self.screen.blit(next_text, (WIDTH // 2 - next_text.get_width() // 2, HEIGHT // 2 + 50))
+                self.render_system_shock_cursor()
                 pygame.display.flip()
                 
                 for e in pygame.event.get():
@@ -720,6 +875,7 @@ class Game:
             self.render_3d_view()
             self.render_weather()
             self.render_ui()
+            self.render_system_shock_cursor()
             
             # Natural health/mana/stamina decay
             if self.stamina > 0:
