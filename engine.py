@@ -35,6 +35,13 @@ def load_audio_safe(filename):
     try: return pygame.mixer.Sound(filename)
     except: return None
 
+def load_image_safe(filename):
+    """Safely load an image and return it, or None if it fails"""
+    try:
+        return pygame.image.load(filename).convert()
+    except:
+        return None
+
 SFX_PICKUP = load_audio_safe("pickup.wav")
 SFX_DOOR = load_audio_safe("door.wav")
 SFX_ERROR = load_audio_safe("error.wav")
@@ -120,9 +127,17 @@ class Game:
         
         # Create icon and sfx dictionaries for Inventory
         icons_dict = {
-            "sword": None, "key": None, "key_silver": None, "key_gold": None,
-            "key_dungeon": None, "health_potion": None, "mana_potion": None,
-            "artifact": None, "unlit_torch": None, "lit_torch": None, "staff": None
+            "sword": load_image_safe("Sword_Icon.png"), 
+            "key": load_image_safe("Key_Icon.png"), 
+            "key_silver": load_image_safe("key_silver.png"), 
+            "key_gold": load_image_safe("key_gold.png"),
+            "key_dungeon": load_image_safe("rusty_key_to_dungeon.png"), 
+            "health_potion": load_image_safe("health_potion.png"), 
+            "mana_potion": load_image_safe("mana_potion.png"),
+            "artifact": load_image_safe("artifact.png"), 
+            "unlit_torch": None, 
+            "lit_torch": None, 
+            "staff": None
         }
         
         sfx_dict = {
@@ -148,6 +163,18 @@ class Game:
         self.time_of_day = 0.0  # 0-1, where 0.5 is noon (sun at top)
         self.sun_angle = 0.0  # Direction of sun (radians)
         self.shadow_length = 2.0  # How far shadows extend
+        
+        # Load textures
+        self.wall_texture = load_image_safe(WALL_TEXTURE_PATH)
+        self.floor_dirt_texture = load_image_safe(FLOOR_DIRT_PATH)
+        self.floor_grass_texture = load_image_safe(FLOOR_GRASS_PATH)
+        
+        # Weather system
+        self.weather_type = 'none'
+        self.weather_time = 0
+        self.weather_particles = []
+        self.weather_duration = 0
+        self.next_weather_time = random.randint(2000, 4000)
 
     def get_initial_map_data(self):
         """Load map from JSON or create default bordered map"""
@@ -256,6 +283,41 @@ class Game:
         # Sun moves in a circle: 0.0 = east, 0.25 = north, 0.5 = west, 0.75 = south
         self.sun_angle = self.time_of_day * 2 * math.pi
 
+    def update_weather(self):
+        """Update weather system"""
+        self.weather_time += 1
+        
+        # Transition to new weather
+        if self.weather_time >= self.next_weather_time:
+            self.weather_type = random.choice(WEATHER_TYPES)
+            min_dur, max_dur = WEATHER_TRANSITIONS[self.weather_type]
+            self.weather_duration = random.randint(min_dur, max_dur)
+            self.weather_time = 0
+            self.next_weather_time = random.randint(int(min_dur * 0.5), int(max_dur * 1.5))
+            self.weather_particles = []
+        
+        # Generate particles
+        particle_count = WEATHER_INTENSITY[self.weather_type].get('count', 0)
+        while len(self.weather_particles) < particle_count:
+            x = random.randint(0, WIDTH)
+            y = random.randint(-50, HEIGHT)
+            self.weather_particles.append([x, y])
+        
+        # Update particle positions
+        for particle in self.weather_particles[:]:
+            if self.weather_type in ['rain', 'rain_heavy']:
+                particle[1] += random.randint(5, 10)
+                particle[0] += random.randint(-2, 2)
+            elif self.weather_type == 'snow':
+                particle[1] += random.randint(1, 3)
+                particle[0] += random.randint(-1, 1)
+            elif self.weather_type == 'sand':
+                particle[1] += random.randint(2, 5)
+                particle[0] += random.randint(2, 5)
+            
+            if particle[1] > HEIGHT:
+                self.weather_particles.remove(particle)
+
     def get_shadow_offset(self, depth, angle_to_player):
         """Calculate shadow offset based on wall distance and sun angle"""
         # Shadow direction is opposite to sun
@@ -301,7 +363,7 @@ class Game:
         return 0.3 + sun_height * 0.7  # Range: 0.3 to 1.0
 
     def render_3d_view(self):
-        """Render the 3D first-person view using raycasting with shadows"""
+        """Render the 3D first-person view using raycasting with textures and shadows"""
         self.raycasting_surface.fill((50, 50, 60))  # Sky/ceiling color
         
         # Draw floor
@@ -329,27 +391,55 @@ class Game:
             x = i * col_width
             
             # Calculate shadow darkness based on sun angle relative to wall
-            # Walls parallel to sun cast no shadow, walls perpendicular cast darkest shadow
-            wall_normal = (angle + math.pi / 2)  # Normal to the wall
-            sun_alignment = math.cos(wall_normal - self.sun_angle)  # -1 to 1
+            wall_normal = (angle + math.pi / 2)
+            sun_alignment = math.cos(wall_normal - self.sun_angle)
             
-            # Shadow intensity: 0 = no shadow (sun directly on wall), 1 = full shadow (sun behind wall)
-            shadow_intensity = max(0, -sun_alignment)  # Only shadows when sun is "behind" wall
+            # Shadow intensity
+            shadow_intensity = max(0, -sun_alignment)
             
             # Base shade from distance
             distance_shade = max(50, 255 - (depth / MAX_DEPTH) * 200)
             
-            # Apply shadow: reduce brightness based on sun position
-            shadow_factor = 1.0 - (shadow_intensity * 0.5)  # Max 50% darkening from shadow
+            # Apply shadow
+            shadow_factor = 1.0 - (shadow_intensity * 0.5)
             final_shade = distance_shade * shadow_factor * sun_brightness
-            final_shade = max(20, min(255, final_shade))  # Clamp to valid range
+            final_shade = max(20, min(255, final_shade))
             
-            color = (final_shade, final_shade * 0.7, final_shade * 0.5)
+            # Apply texture if available
+            if self.wall_texture:
+                # Get texture pixel based on position and depth
+                tex_x = int((self.player_x + math.cos(angle) * depth) * 10) % self.wall_texture.get_width()
+                tex_y = int(depth * 2) % self.wall_texture.get_height()
+                try:
+                    tex_color = self.wall_texture.get_at((tex_x, tex_y))
+                    color = tuple(int(c * final_shade / 255) for c in tex_color[:3])
+                except:
+                    color = (final_shade, final_shade * 0.7, final_shade * 0.5)
+            else:
+                color = (final_shade, final_shade * 0.7, final_shade * 0.5)
             
             rect = pygame.Rect(x, (HEIGHT - wall_height) // 2, col_width, wall_height)
             pygame.draw.rect(self.raycasting_surface, color, rect)
         
         self.screen.blit(self.raycasting_surface, (0, 0))
+
+    def render_weather(self):
+        """Render weather particles"""
+        if self.weather_type == 'none':
+            return
+        
+        if self.weather_type in ['rain', 'rain_heavy']:
+            color = RAIN_COLOR
+            for particle in self.weather_particles:
+                pygame.draw.line(self.screen, color, (particle[0], particle[1]), (particle[0], particle[1] + 5), 1)
+        elif self.weather_type == 'snow':
+            color = SNOW_COLOR
+            for particle in self.weather_particles:
+                pygame.draw.circle(self.screen, color, (int(particle[0]), int(particle[1])), 2)
+        elif self.weather_type == 'sand':
+            color = DUST_COLOR
+            for particle in self.weather_particles:
+                pygame.draw.circle(self.screen, color, (int(particle[0]), int(particle[1])), 1)
 
     def render_minimap(self):
         """Render minimap in top-right corner"""
@@ -381,7 +471,7 @@ class Game:
         player_minimap_y = int((self.player_y / TILE_SIZE) * minimap_tile_size)
         player_pos = (minimap_x + player_minimap_x, minimap_y + player_minimap_y)
         pygame.draw.circle(self.screen, (255, 255, 255), player_pos, 3)
-  
+   
         # Draw sun direction indicator on minimap
         sun_x = minimap_x + int(math.cos(self.sun_angle) * 40)
         sun_y = minimap_y + int(math.sin(self.sun_angle) * 40)
@@ -396,7 +486,6 @@ class Game:
         spacing = 5
         
         # HUD Background panel
-        # Changed * 4 to * 5 to give extra room at the bottom for the Level and Time text
         hud_panel = pygame.Rect(hud_x - 5, hud_y - 5, bar_width + 10, (bar_height + spacing) * 5)
 
         pygame.draw.rect(self.screen, (30, 30, 35), hud_panel)
@@ -443,6 +532,10 @@ class Game:
         hour = int(self.time_of_day * 24)
         time_text = self.font.render(f"Time: {hour:02d}:00", True, (200, 200, 200))
         self.screen.blit(time_text, (hud_x + 5, level_y + 25))
+        
+        # Weather indicator
+        weather_text = self.font.render(f"Weather: {self.weather_type.upper()}", True, (150, 200, 255))
+        self.screen.blit(weather_text, (hud_x + 5, level_y + 50))
 
     def render_ui(self):
         """Render UI elements"""
@@ -454,6 +547,10 @@ class Game:
         
         # Action bar
         self.action_bar.draw(self.screen)
+        
+        # Inventory
+        mouse_pos = pygame.mouse.get_pos()
+        self.inventory.draw(self.screen, mouse_pos, self.font)
 
     def render_stat_screen(self):
         """Render the stat allocation screen"""
@@ -497,7 +594,7 @@ class Game:
         self.screen.blit(points_text, (WIDTH // 2 - points_text.get_width() // 2, HEIGHT - 100))
         
         # Instructions
-        instr = self.font.render("Press C to close | Press ESC to quit", True, (150, 150, 150))
+        instr = self.font.render("Press I for Inventory | Press C to close | Press ESC to quit", True, (150, 150, 150))
         self.screen.blit(instr, (WIDTH // 2 - instr.get_width() // 2, HEIGHT - 40))
 
     def check_item_pickup(self):
@@ -548,6 +645,8 @@ class Game:
                 elif e.type == pygame.KEYDOWN:
                     if e.key == pygame.K_c:
                         self.show_stat_screen = not self.show_stat_screen
+                    elif e.key == pygame.K_i:  # INVENTORY HOTKEY
+                        self.inventory.toggle()
             
             # Stat screen
             if self.show_stat_screen:
@@ -607,8 +706,12 @@ class Game:
             # Update sun position
             self.update_sun_position()
             
+            # Update weather
+            self.update_weather()
+            
             # Render
             self.render_3d_view()
+            self.render_weather()
             self.render_ui()
             
             # Natural health/mana/stamina decay
