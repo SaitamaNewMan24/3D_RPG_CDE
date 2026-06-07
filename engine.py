@@ -237,6 +237,10 @@ class Game:
         old_x, old_y = self.player_x, self.player_y
         move_speed = PLAYER_SPEED
         
+        # Get Alt key state
+        mods = pygame.key.get_mods()
+        alt_held = mods & pygame.KMOD_ALT
+        
         # Forward/Backward movement
         if keys[pygame.K_w]:
             new_x = self.player_x + math.cos(self.player_angle) * move_speed
@@ -252,27 +256,30 @@ class Game:
                 self.player_x = new_x
                 self.player_y = new_y
         
-        # Strafe left/right
+        # A and D keys - strafe with Alt, turn without Alt
         if keys[pygame.K_a]:
-            new_x = self.player_x + math.cos(self.player_angle - math.pi / 2) * move_speed
-            new_y = self.player_y + math.sin(self.player_angle - math.pi / 2) * move_speed
-            if self.is_walkable(new_x, new_y):
-                self.player_x = new_x
-                self.player_y = new_y
+            if alt_held:
+                # Strafe left with Alt+A
+                new_x = self.player_x + math.cos(self.player_angle - math.pi / 2) * move_speed
+                new_y = self.player_y + math.sin(self.player_angle - math.pi / 2) * move_speed
+                if self.is_walkable(new_x, new_y):
+                    self.player_x = new_x
+                    self.player_y = new_y
+            else:
+                # Turn left with A
+                self.player_angle -= PLAYER_ROTATION_SPEED
         
         if keys[pygame.K_d]:
-            new_x = self.player_x + math.cos(self.player_angle + math.pi / 2) * move_speed
-            new_y = self.player_y + math.sin(self.player_angle + math.pi / 2) * move_speed
-            if self.is_walkable(new_x, new_y):
-                self.player_x = new_x
-                self.player_y = new_y
-        
-        # Rotation
-        if keys[pygame.K_LEFT]:
-            self.player_angle -= PLAYER_ROTATION_SPEED
-        
-        if keys[pygame.K_RIGHT]:
-            self.player_angle += PLAYER_ROTATION_SPEED
+            if alt_held:
+                # Strafe right with Alt+D
+                new_x = self.player_x + math.cos(self.player_angle + math.pi / 2) * move_speed
+                new_y = self.player_y + math.sin(self.player_angle + math.pi / 2) * move_speed
+                if self.is_walkable(new_x, new_y):
+                    self.player_x = new_x
+                    self.player_y = new_y
+            else:
+                # Turn right with D
+                self.player_angle += PLAYER_ROTATION_SPEED
 
     def update_sun_position(self):
         """Update sun position based on time of day"""
